@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy a service on AWS ECS with Fargate.
+Parameters:
+  NetworkStackName:
+    Type: String
+    Description: The name of the networking stack.
+  DatabaseStackName:
+    Type: String
+    Description: The name of the database stack.
+  ServiceName:
+    Type: String
+    Description: The service name.
+  HealthCheckPath:
+    Type: String
+    Default: /
+    Description: Path to perform the healthcheck.
+  HealthCheckIntervalSeconds:
+    Type: Number
+    Default: 5
+    Description: Number of seconds to wait between each health check.
+  ImageUrl:
+    Type: String
+    Description: The url where the docker image lives.
+  ContainerPort:
+    Type: Number
+    Default: 80
+    Description: The port number the application inside the docker container
+      is binding to.
+  ContainerCpu:
+    Type: Number
+    Default: 256
+    Description: Amount of CPU resources.
+  ContainerMemory:
+    Type: Number
+    Default: 512
+    Description: Amount of RAM assigned to the container.
+  Path:
+    Type: String
+    Default: "*"
+    Description: A path on the public load balancer that this service should be connected to.
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: Number of copies of the running task.
+
+Resources:
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: !Ref 'HealthCheckIntervalSeconds'
+      HealthCheckPath: !Ref 'HealthCheckPath'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetType: ip
+      Name: !Ref 'ServiceName'
+      Port: !Ref 'ContainerPort'
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'NetworkStackName', 'VPCId']]
+
+  LoadBalancerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - TargetGroupArn: !Ref 'TargetGroup'
+          Type: 'forward'
+      Conditions:
+        - Field: path-pattern
+          Values: [!Ref 'Path']
+      ListenerArn:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'NetworkStackName', 'PublicListener']]
+      Priority: 1
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref 'ServiceName'
+      RetentionInDays: 1
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref 'ServiceName'
+      Cpu: !Ref 'ContainerCpu'
+      Memory: !Ref 'ContainerMemory'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'NetworkStackName', 'ECSTaskExecutionRole']]
+      ContainerDefinitions:
+        - Name: !Ref 'ServiceName'
+          Cpu: !Ref 'ContainerCpu'
+          Memory: !Ref 'ContainerMemory'
+          Image: !Ref 'ImageUrl'
+          Environment:
+            - Name: DB_PORT_3306_TCP_ADDR
+              Value: !Join
+                - ''
+                  - Fn::ImportValue: !Join [':', [!Ref 'DatabaseStackName', 'EndpointAddress']]
+                  - ':'
+                  - Fn::ImportValue: !Join [':', [!Ref 'DatabaseStackName', 'EndpointPort']]
+            - Name: DB_ENV_MYSQL_DATABASE
+              Value: !Join 
+                - ''
+                  - Fn::ImportValue: !Join [':', [!Ref 'DatabaseStackName', 'DBName']]
+            - Name: DB_ENV_MYSQL_USER
+              Value: !Join
+                - ''
+                - - '{{resolve:secretsmanager:'
+                  - Fn::ImportValue: !Join [':', [!Ref 'DatabaseStackName', 'Secret']]
+                  - ':SecretString:username}}'
+            - Name: DB_ENV_MYSQL_PASSWORD
+              Value: !Join
+                - ''
+                - - '{{resolve:secretsmanager:'
+                  - Fn::ImportValue: !Join [':', [!Ref 'DatabaseStackName', 'Secret']]
+                  - ':SecretString:password}}'
+            - Name: MOODLE_URL
+              Value:
+                - Fn::ImportValue:
+                !Join [':', [!Ref 'NetworkStackName', 'ExternalUrl']]
+          PortMappings:
+            - ContainerPort: !Ref 'ContainerPort'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Ref 'ServiceName'
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref 'ServiceName'
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerRule
+    Properties:
+      ServiceName: !Ref 'ServiceName'
+      Cluster:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'NetworkStackName', 'ClusterName']]
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      DesiredCount: !Ref 'DesiredCount'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Fn::ImportValue:
+                !Join [':', [!Ref 'NetworkStackName', 'ECSSecurityGroup']]
+          Subnets:
+            - Fn::ImportValue:
+                !Join [':', [!Ref 'NetworkStackName', 'PublicSubnetOne']]
+            - Fn::ImportValue:
+                !Join [':', [!Ref 'NetworkStackName', 'PublicSubnetTwo']]
+      TaskDefinition: !Ref 'TaskDefinition'
+      LoadBalancers:
+        - ContainerName: !Ref 'ServiceName'
+          ContainerPort: !Ref 'ContainerPort'
+          TargetGroupArn: !Ref 'TargetGroup'
