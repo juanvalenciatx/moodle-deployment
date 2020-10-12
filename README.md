@@ -73,9 +73,9 @@ aws cloudformation create-stack --stack-name moodle-service \\ \
 
 Since you are creating an Elastic Load Balancer, AWS provides a mechanism to have your load balancer behind a secure connection, for production purposes you can create a public certificate for your domain from the AWS Cli:
 
-- aws acm request-certificate --domain-name --profie AWS_PROFILE
+- aws acm request-certificate --domain-name --profile AWS_PROFILE
 
-The certificate is going to be available after you make the proper DNS validation from your domain administration, finally add a CNAME entry from your domain to the load balancer public DNS.
+The certificate is going to be available after you make the proper DNS validation from your domain administration, finally add a CNAME entry from your domain administration console to the load balancer public DNS.
 
 Where:
 
