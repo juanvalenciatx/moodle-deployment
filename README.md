@@ -75,7 +75,7 @@ Since you are creating an Elastic Load Balancer, AWS provides a mechanism to hav
 
 - aws acm request-certificate --domain-name --profile AWS_PROFILE
 
-The certificate is going to be available after you make the proper DNS validation from your domain administration, finally add a CNAME entry from your domain administration console to the load balancer public DNS.
+The certificate is going to be available after you make the proper DNS validation from your domain administration console, finally add a CNAME entry from your domain administration console to the load balancer public DNS.
 
 Where:
 
